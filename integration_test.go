@@ -47,7 +47,9 @@ var (
 
 func TestMain(m *testing.M) {
 	keys := strings.Split(os.Getenv("LIVEKIT_KEYS"), ": ")
-	apiKey, apiSecret = keys[0], keys[1]
+	if len(keys) >= 2 {
+		apiKey, apiSecret = keys[0], keys[1]
+	}
 
 	os.Exit(m.Run())
 }
@@ -79,7 +81,7 @@ func pubNullTrack(t *testing.T, room *Room, name string) *LocalTrackPublication 
 
 	track.OnBind(func() {
 		if err := track.StartWrite(provider, func() {}); err != nil {
-			logger.Errorw("Could not start writing", err)
+			track.log.Errorw("Could not start writing", err)
 		}
 	})
 
@@ -194,7 +196,7 @@ func TestResume(t *testing.T) {
 	pub.Simulate(SimulateSignalReconnect)
 	require.Eventually(t, func() bool { return reconnected.Load() }, 5*time.Second, 100*time.Millisecond)
 
-	logger.Infow("reconnected")
+	pub.log.Infow("reconnected")
 
 	localPub := pubNullTrack(t, pub, audioTrackName)
 	require.Equal(t, localPub.Name(), audioTrackName)
@@ -224,7 +226,7 @@ func TestForceTLS(t *testing.T) {
 	pub.Simulate(SimulateForceTLS)
 	require.Eventually(t, func() bool { return reconnected.Load() && pub.engine.ensurePublisherConnected(true) == nil }, 15*time.Second, 100*time.Millisecond)
 
-	logger.Infow("reconnected")
+	pub.log.Infow("reconnected")
 
 	getSelectedPair := func(pc *webrtc.PeerConnection) (*webrtc.ICECandidatePair, error) {
 		sctp := pc.SCTP()

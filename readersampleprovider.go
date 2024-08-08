@@ -26,13 +26,13 @@ import (
 	"github.com/pion/webrtc/v3/pkg/media"
 	"github.com/pion/webrtc/v3/pkg/media/h264reader"
 	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
-	"github.com/pion/webrtc/v3/pkg/media/oggreader"
+
+	"github.com/livekit/server-sdk-go/v2/pkg/oggreader"
 )
 
 const (
 	// defaults to 30 fps
 	defaultH264FrameDuration = 33 * time.Millisecond
-	defaultOpusFrameDuration = 20 * time.Millisecond
 )
 
 // ReaderSampleProvider provides samples by reading from an io.ReadCloser implementation
@@ -57,8 +57,7 @@ type ReaderSampleProvider struct {
 	h264reader *h264reader.H264Reader
 
 	// for ogg
-	oggReader   *oggreader.OggReader
-	lastGranule uint64
+	oggReader *oggreader.OggReader
 }
 
 type ReaderSampleProviderOption func(*ReaderSampleProvider)
@@ -178,7 +177,7 @@ func NewLocalReaderTrack(in io.ReadCloser, mime string, options ...ReaderSampleP
 	track.OnBind(func() {
 		provider.OnWriteStart(track)
 		if err := track.StartWrite(provider, provider.OnWriteComplete); err != nil {
-			logger.Errorw("Could not start writing", err)
+			track.log.Errorw("Could not start writing", err)
 		}
 	})
 
@@ -202,7 +201,7 @@ func (p *ReaderSampleProvider) OnBind() error {
 			p.ivfTimebase = float64(ivfHeader.TimebaseNumerator) / float64(ivfHeader.TimebaseDenominator)
 		}
 	case webrtc.MimeTypeOpus:
-		p.oggReader, _, err = oggreader.NewWith(p.reader)
+		p.oggReader, _, err = oggreader.NewOggReader(p.reader)
 	default:
 		err = ErrUnsupportedFileType
 	}
@@ -263,17 +262,15 @@ func (p *ReaderSampleProvider) NextSample(ctx context.Context) (media.Sample, er
 		sample.Duration = time.Duration(p.ivfTimebase*float64(delta)*1000) * time.Millisecond
 		p.lastTimestamp = header.Timestamp
 	case webrtc.MimeTypeOpus:
-		pageData, pageHeader, err := p.oggReader.ParseNextPage()
+		payload, err := p.oggReader.ReadPacket()
 		if err != nil {
 			return sample, err
 		}
-		sampleCount := float64(pageHeader.GranulePosition - p.lastGranule)
-		p.lastGranule = pageHeader.GranulePosition
 
-		sample.Data = pageData
-		sample.Duration = time.Duration((sampleCount/48000)*1000) * time.Millisecond
-		if sample.Duration == 0 {
-			sample.Duration = defaultOpusFrameDuration
+		sample.Data = payload
+		sample.Duration, err = oggreader.ParsePacketDuration(payload)
+		if err != nil {
+			return sample, err
 		}
 	}
 
